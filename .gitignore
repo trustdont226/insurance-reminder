@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+
+# Database
+*.db
+*.sqlite
+
+# Uploads
+uploads/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+.vs/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.zip
+dist/
+build/
