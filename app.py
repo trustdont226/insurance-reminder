@@ -27,8 +27,14 @@ from core.database import (
     set_setting,
     update_record,
 )
+from core.config import using_supabase
 from core.pdf_processor import extract_insurance_data
-from core.storage import save_pdf
+from core.storage import (
+    delete_temp,
+    save_pdf,
+    save_pdf_temp,
+    upload_to_supabase,
+)
 from core.whatsapp import DEFAULT_TEMPLATE, build_reminder_message, build_whatsapp_url
 
 
@@ -85,12 +91,19 @@ def index():
 
 @app.route("/api/upload", methods=["POST"])
 def upload():
-    """Accept one or more PDF files and extract insurance data from each."""
+    """
+    Accept one or more PDF files, extract insurance data, and persist:
+      • OCR runs on a local temp copy
+      • PDF is uploaded to Supabase Storage (if configured)
+      • Temp copy is deleted afterwards
+    """
     files = request.files.getlist("files")
     if not files:
         return jsonify({"error": "No files provided"}), 400
 
     results = []
+    use_supabase = using_supabase()
+
     for file in files:
         if not file.filename:
             continue
@@ -99,17 +112,37 @@ def upload():
                              "error": "Only PDF files are accepted"})
             continue
 
-        save_path = save_pdf(file, file.filename)
-
+        temp_path = None
+        storage_key = None
         try:
-            data = extract_insurance_data(save_path)
+            if use_supabase:
+                temp_path = save_pdf_temp(file, file.filename)
+                ocr_path  = temp_path
+            else:
+                # Local-only fallback
+                ocr_path = save_pdf(file, file.filename)
+
+            data = extract_insurance_data(ocr_path)
             data["pdf_filename"] = file.filename
+
+            if use_supabase:
+                try:
+                    storage_key = upload_to_supabase(temp_path, file.filename)
+                    data["pdf_storage_path"] = storage_key
+                except Exception as upload_err:
+                    # OCR succeeded — keep the data even if Supabase upload fails
+                    print(f"[Storage] Upload failed for {file.filename}: {upload_err}")
+
             record_id = insert_record(data)
             data["id"] = record_id
             results.append({"filename": file.filename, "success": True, "data": data})
+
         except Exception as exc:
             results.append({"filename": file.filename, "success": False,
                              "error": str(exc)})
+        finally:
+            if temp_path:
+                delete_temp(temp_path)
 
     return jsonify(results)
 
